@@ -218,3 +218,79 @@ being stored, and no score is ever produced. Check
 Restarting the engine takes about two seconds. Webhooks that land in that
 window are retried by the helpdesk, so a restart during normal traffic is
 safe.
+
+---
+
+## Keeping it alive properly (systemd)
+
+`start.sh` uses `nohup`, so the engine survives you closing the terminal or
+logging out. It does **not** survive a reboot, and nothing restarts it if it
+crashes. Three hosts have been lost so far and in each case the service
+simply stopped existing.
+
+For anything that matters, install the units instead. This is one root step
+and then you can stop thinking about it.
+
+```bash
+cd ~/kers-engine
+
+# Point the units at this host: replace the user and paths if not khushi.s
+sed -i "s|khushi.s|$USER|g" deploy/systemd/*.service
+
+sudo cp deploy/systemd/kers-engine.service /etc/systemd/system/
+sudo cp deploy/systemd/kers-tunnel.service /etc/systemd/system/
+sudo systemctl daemon-reload
+
+sudo systemctl enable --now kers-engine
+sudo systemctl enable --now kers-tunnel
+```
+
+`enable` is what makes it come back after a reboot; `--now` starts it
+immediately.
+
+```bash
+systemctl status kers-engine
+journalctl -u kers-engine -f          # live logs
+journalctl -u kers-tunnel | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1
+sudo systemctl restart kers-engine    # e.g. after changing a prompt
+```
+
+What the units give you over `nohup`:
+
+| | nohup | systemd |
+|---|---|---|
+| survives closing the terminal | yes | yes |
+| survives logout | yes | yes |
+| survives a crash | **no** | yes, `Restart=always` |
+| survives a reboot | **no** | yes, via `enable` |
+| log rotation | no, `uvicorn.out` grows forever | journald handles it |
+| credentials | `source`d into the shell | read by systemd, never in the process list |
+
+Do not run both at once — stop the `nohup` copies first with
+`./deploy/stop.sh --all`, or you will have two engines fighting over port
+8000 and the second will fail to bind.
+
+### The tunnel caveat
+
+`kers-tunnel.service` will faithfully restart cloudflared, but a **quick
+tunnel gets a new random hostname every restart**. The process comes back,
+the webhook stays broken, and nothing on this host looks wrong.
+
+Auto-restart only fully works with a **named tunnel**, which keeps a fixed
+hostname:
+
+```bash
+~/bin/cloudflared tunnel login
+~/bin/cloudflared tunnel create kers
+~/bin/cloudflared tunnel route dns kers kers.<your-domain>
+```
+
+then change `ExecStart` in the unit to:
+
+```
+ExecStart=/home/<user>/bin/cloudflared tunnel --no-autoupdate run kers
+```
+
+After that the webhook URL never changes again, and the helpdesk never needs
+repointing. This is the single change that would have prevented most of the
+outages this service has had.

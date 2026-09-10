@@ -1,0 +1,60 @@
+[Unit]
+Description=Cloudflare tunnel fronting the KERS engine
+Documentation=https://github.com/hevoio/kers-engine
+After=network-online.target kers-engine.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+
+# --- edit these for the host ---
+User=khushi.s
+Group=khushi.s
+WorkingDirectory=/home/khushi.s/kers-engine
+# -------------------------------
+
+# --no-autoupdate is mandatory. Without it cloudflared replaces its own
+# binary once a day and exits, expecting to be restarted. Under systemd it
+# WOULD come back — but a quick tunnel comes back on a DIFFERENT hostname,
+# which silently breaks the helpdesk webhook. Pin the version instead.
+ExecStart=/home/khushi.s/bin/cloudflared tunnel \
+    --no-autoupdate \
+    --url http://localhost:8000
+
+Restart=always
+RestartSec=10s
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kers-tunnel
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+
+# ---------------------------------------------------------------------------
+# READ THIS BEFORE RELYING ON AUTO-RESTART
+#
+# With a QUICK tunnel (the --url form above), every restart produces a new
+# random hostname. systemd will faithfully bring the process back, but the
+# helpdesk is still pointed at the old address, so webhooks keep failing and
+# nothing looks wrong on this host.
+#
+# Auto-restart is therefore only genuinely useful with a NAMED tunnel, which
+# keeps a fixed hostname across restarts:
+#
+#   cloudflared tunnel login
+#   cloudflared tunnel create kers
+#   cloudflared tunnel route dns kers kers.<your-domain>
+#
+# then replace ExecStart above with:
+#
+#   ExecStart=/home/khushi.s/bin/cloudflared tunnel --no-autoupdate run kers
+#
+# After that the webhook URL never changes again and this unit is a complete
+# solution. Until then, check the URL after any restart:
+#
+#   journalctl -u kers-tunnel | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1
+# ---------------------------------------------------------------------------

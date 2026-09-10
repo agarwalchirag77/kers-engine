@@ -1,0 +1,50 @@
+[Unit]
+Description=KERS escalation risk scoring engine
+Documentation=https://github.com/hevoio/kers-engine
+# network-online, not just network: the engine reaches the model API and the
+# helpdesk API during startup, and starting before DNS resolves fails.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+
+# --- edit these three for the host ---
+User=khushi.s
+Group=khushi.s
+WorkingDirectory=/home/khushi.s/kers-engine
+# -------------------------------------
+
+# Credentials. systemd parses this itself, so no `set -a; source` dance, and
+# the values never appear in the process list.
+EnvironmentFile=/home/khushi.s/kers-engine/.env
+
+ExecStart=/home/khushi.s/kers-engine/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 --port 8000 \
+    --log-config uvicorn_log_config.json
+
+# The whole point of running under systemd rather than nohup: come back after
+# a crash, and come back after a reboot.
+Restart=always
+RestartSec=5s
+
+# Don't thrash if it is crash-looping on a bad config — fail loudly instead so
+# `systemctl status` shows a clear failure rather than an endless restart.
+StartLimitBurst=5
+StartLimitIntervalSec=120
+
+# Logs go to journald: `journalctl -u kers-engine -f`. The engine's own JSONL
+# event log is separate and still lands in logs/.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kers-engine
+
+# Modest hardening. The service only needs to write inside its own directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/khushi.s/kers-engine
+
+[Install]
+WantedBy=multi-user.target

@@ -133,6 +133,17 @@ See `deploy/secrets.env.example`. Optional overrides: `ERS_MODEL`,
 
 ## Running
 
+For a server, install the systemd units — they survive a closed terminal, a
+logout, a crash and a reboot. See [deploy/DEPLOY.md](deploy/DEPLOY.md).
+
+```bash
+./deploy/start.sh          # background, writes a pidfile, prints health
+./deploy/tunnel.sh         # tunnel + the webhook URL to register
+./deploy/stop.sh --all     # stop both
+```
+
+In the foreground, for local development only:
+
 ```bash
 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 \
   --log-config uvicorn_log_config.json
@@ -140,6 +151,8 @@ See `deploy/secrets.env.example`. Optional overrides: `ERS_MODEL`,
 
 Point your helpdesk's webhook at `POST /webhooks/zendesk/events`.
 `--log-config` adds timestamps to access logs, which the default does not.
+Binding `127.0.0.1` is deliberate — with no webhook secret set there is no
+signature check, so `0.0.0.0` would expose an unauthenticated endpoint.
 
 If the webhook secret is set, requests are verified by HMAC-SHA256 and
 unsigned ones are rejected. If it is empty, verification is skipped — fine for
