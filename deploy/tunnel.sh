@@ -13,6 +13,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Same variable start.sh uses, and .env wins if it sets one, so the tunnel
+# always fronts whatever port the engine actually bound.
+[ -f .env ] && { set -a; . ./.env; set +a; }
+PORT="${ERS_PORT:-8080}"
+
 CF="${CLOUDFLARED:-$HOME/bin/cloudflared}"
 [ -x "$CF" ] || { echo "ERROR: cloudflared not found at $CF (see deploy/DEPLOY.md)" >&2; exit 1; }
 
@@ -25,7 +30,7 @@ fi
 mkdir -p logs
 rm -f logs/cloudflared.out
 
-nohup "$CF" tunnel --no-autoupdate --url http://localhost:8000 \
+nohup "$CF" tunnel --no-autoupdate --url "http://localhost:$PORT" \
     > logs/cloudflared.out 2>&1 < /dev/null &
 echo $! > cloudflared.pid
 disown 2>/dev/null || true
@@ -43,7 +48,7 @@ if [ -z "$URL" ]; then
     exit 1
 fi
 
-echo "pid $(cat cloudflared.pid)"
+echo "pid $(cat cloudflared.pid)  ->  localhost:$PORT"
 echo
 echo "  webhook endpoint:"
 echo "    ${URL}/webhooks/zendesk/events"

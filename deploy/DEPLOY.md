@@ -68,6 +68,11 @@ ERS_TICKET_DIR=/home/<user>/kers-engine/ticket_files
 ERS_LOG_DIR=/home/<user>/kers-engine/logs
 ```
 
+The engine listens on **port 8080** by default. To change it, add
+`ERS_PORT=<n>` to `.env` — `start.sh`, `tunnel.sh` and both systemd units
+all read that one variable, so the tunnel always follows the engine rather
+than being configured separately and drifting.
+
 **Leave `ZENDESK_WEBHOOK_SECRET` empty unless the helpdesk is actually
 signing requests.** If a value is set and the helpdesk does not sign with
 that exact secret, every webhook is rejected with 401 and scoring stops
@@ -268,7 +273,7 @@ What the units give you over `nohup`:
 
 Do not run both at once — stop the `nohup` copies first with
 `./deploy/stop.sh --all`, or you will have two engines fighting over port
-8000 and the second will fail to bind.
+the port and the second will fail to bind.
 
 ### The tunnel caveat
 

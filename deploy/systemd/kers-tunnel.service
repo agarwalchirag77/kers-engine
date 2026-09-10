@@ -13,13 +13,21 @@ Group=khushi.s
 WorkingDirectory=/home/khushi.s/kers-engine
 # -------------------------------
 
+# Port default, overridden by .env if it sets ERS_PORT. The leading `-` on
+# EnvironmentFile makes a missing .env non-fatal — the tunnel does not need
+# credentials, only the port.
+Environment=ERS_PORT=8080
+EnvironmentFile=-/home/khushi.s/kers-engine/.env
+
 # --no-autoupdate is mandatory. Without it cloudflared replaces its own
 # binary once a day and exits, expecting to be restarted. Under systemd it
 # WOULD come back — but a quick tunnel comes back on a DIFFERENT hostname,
-# which silently breaks the helpdesk webhook. Pin the version instead.
-ExecStart=/home/khushi.s/bin/cloudflared tunnel \
-    --no-autoupdate \
-    --url http://localhost:8000
+# which silently breaks the helpdesk webhook.
+#
+# Run via sh so ${ERS_PORT} expands reliably inside the URL argument, and so
+# the tunnel always follows whatever port the engine is configured for.
+ExecStart=/bin/sh -c 'exec /home/khushi.s/bin/cloudflared tunnel \
+    --no-autoupdate --url "http://localhost:${ERS_PORT:-8080}"'
 
 Restart=always
 RestartSec=10s

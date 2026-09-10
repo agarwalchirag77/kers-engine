@@ -128,8 +128,11 @@ export ZENDESK_API_TOKEN=...
 export ZENDESK_WEBHOOK_SECRET=      # leave empty to skip signature checks
 ```
 
-See `deploy/secrets.env.example`. Optional overrides: `ERS_MODEL`,
-`ERS_DATA_DIR`, `ERS_TICKET_DIR`, `ERS_LOG_DIR`.
+See `deploy/secrets.env.example`. Optional overrides: `ERS_PORT` (default
+`8080`), `ERS_MODEL`, `ERS_DATA_DIR`, `ERS_TICKET_DIR`, `ERS_LOG_DIR`.
+
+`ERS_PORT` is read by both deploy scripts and both systemd units, so setting
+it once in `.env` moves the engine and the tunnel together.
 
 ## Running
 
@@ -145,7 +148,7 @@ logout, a crash and a reboot. See [deploy/DEPLOY.md](deploy/DEPLOY.md).
 In the foreground, for local development only:
 
 ```bash
-.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 \
+.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080 \
   --log-config uvicorn_log_config.json
 ```
 

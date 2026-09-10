@@ -15,12 +15,15 @@ Group=khushi.s
 WorkingDirectory=/home/khushi.s/kers-engine
 # -------------------------------------
 
+# Default port. Listed BEFORE EnvironmentFile so a value in .env overrides it.
+Environment=ERS_PORT=8080
+
 # Credentials. systemd parses this itself, so no `set -a; source` dance, and
 # the values never appear in the process list.
 EnvironmentFile=/home/khushi.s/kers-engine/.env
 
 ExecStart=/home/khushi.s/kers-engine/.venv/bin/uvicorn app.main:app \
-    --host 127.0.0.1 --port 8000 \
+    --host 127.0.0.1 --port ${ERS_PORT} \
     --log-config uvicorn_log_config.json
 
 # The whole point of running under systemd rather than nohup: come back after
