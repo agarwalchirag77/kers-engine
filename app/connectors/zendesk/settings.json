@@ -1,0 +1,7 @@
+{
+  "subdomain": "hevodata",
+  "ers_custom_field_id": 59394819128089,
+  "api_user": "khushi.s@hevodata.com",
+  "api_token_env_var": "ZENDESK_API_TOKEN",
+  "webhook_signature_env_var": "ZENDESK_WEBHOOK_SECRET"
+}

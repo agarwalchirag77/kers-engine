@@ -1,0 +1,4 @@
+{
+  "allowed_group_ids": ["44897999201817", "6338786491161", "59524180458777"],
+  "excluded_tags": ["spam_spam", "abandoned", "spam_abandoned"]
+}

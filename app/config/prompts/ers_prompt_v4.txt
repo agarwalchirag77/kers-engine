@@ -1,0 +1,117 @@
+You are analyzing a customer support conversation to compute an Escalation
+Risk Score (ERS). Your output is consumed by an automated system; respond
+with valid JSON only.
+
+You are given the full conversation history between a customer and one or
+more support agents, with timestamps on every message.
+
+IMPORTANT — most sub-scores measure ONLY the customer:
+
+  Seven of the eight sub-scores are CUSTOMER-focused. They measure the
+  customer's state — not the agent's, not the overall tone of the thread.
+  Agent messages are context (they explain WHY the customer is reacting
+  the way they are), but agent messages are NOT evidence for scoring
+  customer signals. A calm, polite agent reply does not lower the
+  customer's frustration score; a rude agent reply does not raise it.
+  Only `agent_tone` scores the agent.
+
+IMPORTANT — sub-score timing semantics:
+
+  Customer-focused sub-scores reflect the customer's CURRENT state —
+  what they are expressing in their most recent messages, not the whole
+  history. Agent replies inside that recency window are not counted;
+  look only at what the customer has written. Older customer messages
+  from earlier in the ticket belong in the trajectory signal, not in
+  the current-state signals. If the customer was hostile earlier but
+  their most recent messages are genuinely calm, the state-based scores
+  (frustration, politeness_erosion, confusion, urgency) should be LOW.
+  The historical arc lives in trajectory alone.
+
+IMPORTANT — commitment timing is pre-computed for you:
+
+  The engine has already detected every agent commitment in the
+  conversation and classified each one as DELIVERED, MISSED, or PENDING
+  based on the actual current evaluation time. You do NOT need to detect
+  commitments or decide whether they were met. Trust the analysis below.
+
+  COMMITMENT ANALYSIS:
+  {commitment_analysis}
+
+  Current evaluation time: {evaluation_time}
+
+Use the commitment counts above to inform your scoring of the CUSTOMER
+signals above (e.g., a customer is more likely to be frustrated after a
+clearly MISSED commitment; PENDING commitments shouldn't drive
+frustration much yet).
+
+Return a JSON object with these fields, each a float in [0.0, 5.0]:
+
+- frustration: the CUSTOMER's emotional intensity, anger, or hostility
+  in their most recent messages. Look ONLY at what the customer wrote.
+  Agent responses inside the recency window are not evidence for or
+  against this signal. Sharp customer language — exclamation-marked
+  complaints, concrete impact scales ("66 tables affected"),
+  characterizations like "step backwards" or "unacceptable" — is direct
+  evidence and should be scored on that message, not diluted by any
+  polite agent replies that surround it.
+- urgency: the time-sensitivity or business impact THE CUSTOMER is
+  signalling in their recent messages. Concrete impact language
+  ("production is down", "we can't ship without this", specific scale
+  numbers) raises this.
+- churn_threat: explicit or implicit signals of leaving from the
+  CUSTOMER — cancellation, refund, legal action, competitor mentions,
+  threats to go public, or product-direction disillusionment ("this is
+  a step backwards", "we might have to move off", "why are you removing
+  features we depend on"). A churn threat once made is not easily
+  un-made; keep this elevated even if the customer's recent messages
+  have since calmed.
+- confusion: the CUSTOMER's clarity on their situation in recent
+  messages — repeated questions, "I don't understand what you're
+  saying", asking the same thing twice. Agent answers do not reduce
+  this score on their own; only the customer's own acknowledgment does.
+- politeness_erosion: drop in the CUSTOMER's civility (loss of
+  greetings, all-caps, sarcasm, terse replies) in recent messages
+  relative to the customer's own earlier baseline. The agent's tone
+  does not enter this score.
+- dissatisfaction_trajectory: direction of the CUSTOMER's sentiment
+  across the whole conversation (0.0 = improving, 2.5 = stable, 5.0 =
+  sharply degrading). This is the only customer-focused signal that
+  looks at the full history.
+- agent_tone: the AGENT's professionalism and empathy in recent
+  messages. Higher = poorer tone (defensive, dismissive, robotic,
+  escalating). 0.0 = excellent tone. This is the ONLY sub-score that
+  measures the agent, not the customer.
+- commitment_to_delivery_ratio: use the engine-computed value from the
+  COMMITMENT ANALYSIS above (do not recompute). PENDING commitments are
+  NOT counted as missed.
+
+Also return:
+- top_signal: the name of the single dominant sub-score
+- confidence: a float in [0.0, 5.0] expressing your overall confidence
+  in this assessment. 0.0 = highly uncertain (sparse or ambiguous
+  signal); 5.0 = high confidence. Use lower values when the
+  conversation is short, ambiguous, or the sub-score signals conflict.
+- reasoning: 2-3 sentences in plain English explaining the assessment,
+  referencing the commitment analysis where relevant
+- commitments_detected: integer count of agent commitments found
+  (use the engine value from the analysis above)
+- commitments_missed: integer count of MISSED commitments
+  (use the engine value from the analysis above; do not count PENDING)
+
+Rules:
+- A calm, brief customer message that mentions cancellation, refund, or
+  moving off the product is HIGH churn_threat. Length alone does not
+  indicate severity.
+- If the conversation is in a language other than English, assess it
+  according to that language's norms.
+- Return valid JSON only. No prose outside the JSON object.
+
+Ticket metadata:
+- Subject: {subject}
+- Channel: {channel}
+- Tags: {tags}
+- Locale: {locale}
+- Priority: {priority}
+
+Conversation (chronological, full history):
+{formatted_messages}

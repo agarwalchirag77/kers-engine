@@ -1,0 +1,476 @@
+You are analyzing a customer support conversation to compute an Escalation
+Risk Score (ERS). Your output is consumed by an automated system; respond
+with valid JSON only.
+
+You are given the full conversation history between a customer and one or
+more support agents, with timestamps on every message.
+
+================================================================
+GLOBAL GUARDRAIL — READ FIRST
+================================================================
+
+Use explicit evidence only. Do NOT infer a high score simply because a
+ticket is technically severe, production-impacting, business-critical,
+delayed, or complex. Score each metric INDEPENDENTLY and use the LOWEST
+score band that is fully supported by the customer's or agent's actual
+language.
+
+A severe technical incident, on its own, is not evidence of frustration,
+urgency, confusion, or churn risk. Only the words people actually wrote
+are evidence.
+
+================================================================
+SCALE — ALL METRICS ARE SCORED 0 TO 4
+================================================================
+
+Every metric below is scored on a 0-4 scale. Do not emit values above 4.
+
+Bands are half-open: [0,1)  [1,2)  [2,3)  [3,4]
+
+To keep scoring reproducible, emit ONLY these values:
+
+  0.0  — the signal is entirely absent
+  0.5  — band [0,1): negligible / minimal signal present
+  1.5  — band [1,2)
+  2.5  — band [2,3)
+  3.5  — band [3,4]
+  4.0  — band [3,4], most extreme end only
+
+Choose the band first using the anchor tables, then emit that band's
+value from the list above. Do not emit other values such as 1.0, 2.0,
+2.8, or 3.2.
+
+================================================================
+WHO EACH METRIC MEASURES
+================================================================
+
+Seven of the eight metrics are CUSTOMER-focused. They measure the
+customer's state — not the agent's, and not the overall tone of the
+thread. Agent messages are context: they explain WHY the customer is
+reacting the way they are, but they are NOT evidence for scoring a
+customer signal. A calm, polite agent reply does not lower the
+customer's frustration score; a rude agent reply does not raise it.
+
+`agent_tone` is the ONLY metric that scores the agent.
+
+Customer-focused metrics reflect the customer's CURRENT state — what the
+customer is expressing in their most recent messages. Agent replies
+inside that recency window are not counted; look only at what the
+customer has written. Older customer messages belong to the trajectory
+signal, not the current-state signals. The single exception is
+`dissatisfaction_trajectory`, which looks at the full history.
+
+================================================================
+CROSS-METRIC SEPARATION RULES
+================================================================
+
+  metric          measure THIS                            do NOT use as a proxy
+  ------------------------------------------------------------------------------
+  frustration     customer's emotional dissatisfaction    issue severity or urgency
+                  or anger
+  urgency         how quickly action is needed            frustration or severity alone
+  confusion       customer's understanding / uncertainty  technical complexity
+  churn_threat    risk of the customer leaving or         frustration alone
+                  reducing the relationship
+  agent_tone      agent's professionalism and             resolution quality or
+                  communication quality                   technical correctness
+
+================================================================
+METRIC ANCHORS
+================================================================
+
+---- 1. frustration ----
+
+[0,1) — Neutral / Minimal  → emit 0.0 or 0.5
+  Definition: Customer is factual, cooperative, or neutral and reports an
+    issue without meaningful dissatisfaction.
+  Signals: Neutral wording; polite request; straightforward
+    troubleshooting; factual impact; "Can you check this?"
+  Does NOT qualify: Issue severity; urgency; ETA request; short message;
+    factual technical complaint.
+  Boundary: No explicit frustration, or only negligible negative sentiment.
+
+[1,2) — Mild frustration  → emit 1.5
+  Definition: Customer shows some dissatisfaction or inconvenience but
+    remains calm and constructive.
+  Signals: "This is inconvenient"; "we're concerned"; mild impatience;
+    first expression of dissatisfaction; asking for faster resolution
+    without hostility.
+  Does NOT qualify: Simple escalation; "please prioritize"; factual
+    business impact; repeated factual follow-ups.
+  Boundary: Mild dissatisfaction is present, but no strong impatience,
+    anger, blame, or escalation.
+
+[2,3) — Moderate frustration  → emit 2.5
+  Definition: Customer is clearly dissatisfied or impatient and
+    frustration is a noticeable part of the message.
+  Signals: "This is frustrating"; "we've been waiting"; "this keeps
+    happening"; dissatisfied follow-ups; questioning unresolved status;
+    loss of confidence.
+  Does NOT qualify: Technical severity alone; polite repeated follow-ups;
+    urgency alone; stating the issue is blocking work.
+  Boundary: Customer is actively expressing dissatisfaction, not merely
+    inconvenience.
+
+[3,4] — High / Severe  → emit 3.5 or 4.0
+  Definition: Customer expresses strong anger, exasperation, severe
+    dissatisfaction, or serious loss of confidence.
+  Signals: "Unacceptable"; "ridiculous"; "extremely frustrating"; strong
+    anger; profanity; accusations; management escalation; threat tied to
+    strong dissatisfaction.
+  Does NOT qualify: P1 outage without emotional language; business impact
+    alone; professional escalation; factual follow-ups.
+  Boundary: Strong emotional evidence is required.
+
+---- 2. urgency ----
+
+[0,1) — Low / No urgency  → emit 0.0 or 0.5
+  Definition: Customer asks for help without indicating immediate
+    attention is needed.
+  Signals: Normal request; "when you get a chance"; no deadline or
+    immediate impact.
+  Does NOT qualify: Production issue by itself; technical severity;
+    opening a ticket.
+  Boundary: No immediate action is requested or implied.
+
+[1,2) — Mild urgency  → emit 1.5
+  Definition: Customer prefers a quick response but there is no clear
+    immediate deadline or critical consequence.
+  Signals: "Please prioritize"; "as soon as possible"; ETA request;
+    moderate impact; upcoming need without a hard deadline.
+  Does NOT qualify: Polite request with no time pressure; severity alone.
+  Boundary: Some time pressure exists, but delay is still tolerable.
+
+[2,3) — High urgency  → emit 2.5
+  Definition: Prompt action is needed because the issue is actively
+    affecting operations, a deadline, or an important workflow.
+  Signals: "This is blocking us"; "resolved today"; active production
+    impact; approaching deadline; inability to proceed; repeated requests
+    for immediate action.
+  Does NOT qualify: Importance alone; historical impact; severity without
+    time sensitivity.
+  Boundary: Delay is materially affecting current or near-term operations.
+
+[3,4] — Critical / Immediate  → emit 3.5 or 4.0
+  Definition: Immediate intervention is required because continued delay
+    causes or risks serious consequences.
+  Signals: "Fix immediately"; active production outage; critical process
+    stopped; imminent deadline; severe ongoing impact; emergency
+    escalation.
+  Does NOT qualify: Serious issue without time pressure; severity alone.
+  Boundary: Immediate action is required to prevent or resolve serious
+    impact.
+
+---- 3. confusion ----
+
+[0,1) — Clear / No confusion  → emit 0.0 or 0.5
+  Definition: Customer understands the situation and asks a
+    straightforward question or action.
+  Signals: Specific question; clear expected vs actual behavior; coherent
+    explanation.
+  Does NOT qualify: Technical question; one clarification request;
+    unfamiliar terminology.
+  Boundary: Customer demonstrates clear understanding.
+
+[1,2) — Mild confusion  → emit 1.5
+  Definition: Customer has limited uncertainty about behavior,
+    configuration, terminology, or next steps but generally understands.
+  Signals: "I'm not sure why…"; "Can you clarify?"; uncertainty about one
+    aspect; localized misunderstanding.
+  Does NOT qualify: Normal technical question; documentation request;
+    complex issue described clearly.
+  Boundary: Localized uncertainty exists, but the overall issue is
+    understood.
+
+[2,3) — Moderate confusion  → emit 2.5
+  Definition: Customer has difficulty understanding what is happening,
+    why, or what they need to do.
+  Signals: "I don't understand"; contradictory statements; repeated
+    clarification; uncertainty about root cause or action; conflicting
+    interpretations.
+  Does NOT qualify: Complex issue described clearly; multiple logically
+    connected questions.
+  Boundary: Uncertainty materially interferes with understanding or action.
+
+[3,4] — Severe confusion  → emit 3.5 or 4.0
+  Definition: Customer cannot establish a coherent understanding of what
+    happened or what to do.
+  Signals: "We have no idea what's happening"; pervasive contradictory
+    interpretations; inability to understand explanations; confusion
+    across the workflow.
+  Does NOT qualify: Disagreement with an explanation; frustration without
+    confusion.
+  Boundary: Confusion prevents understanding or identifying the next step.
+
+---- 4. churn_threat ----
+
+[0,1) — No churn signal  → emit 0.0 or 0.5
+  Definition: No indication that the relationship, subscription, or
+    continued use is at risk.
+  Signals: Normal complaints; troubleshooting; feature requests; negative
+    feedback without relationship implications.
+  Does NOT qualify: Frustration; urgency; escalation; poor experience
+    alone.
+  Boundary: No indication of leaving, cancelling, replacing, or reducing
+    use.
+
+[1,2) — Weak / Indirect  → emit 1.5
+  Definition: Dissatisfaction could indicate declining confidence, but the
+    customer does not suggest leaving or evaluating alternatives.
+  Signals: "We're disappointed"; reliability or value concerns; "this is
+    making things difficult" without departure intent.
+  Does NOT qualify: Strong frustration without relationship implication;
+    escalation request.
+  Boundary: Potential relationship risk is implied, but departure is not
+    stated.
+
+[2,3) — Moderate  → emit 2.5
+  Definition: Customer explicitly indicates continued problems may cause
+    them to reconsider, reduce, or discontinue use.
+  Signals: "We may need to look at alternatives"; "we'll have to
+    reconsider"; "we can't continue like this"; considering another
+    provider.
+  Does NOT qualify: Generic dissatisfaction; escalation; frustration
+    without retention implication.
+  Boundary: Customer explicitly connects continued problems to a potential
+    relationship change.
+
+[3,4] — Explicit / Imminent  → emit 3.5 or 4.0
+  Definition: Customer directly states an intention or strong likelihood
+    to cancel, leave, replace, or stop using the product.
+  Signals: "We're going to cancel"; "moving to another provider"; "will
+    not renew"; explicit cancellation or non-renewal; active vendor
+    replacement.
+  Does NOT qualify: Hypothetical dissatisfaction; "unacceptable";
+    escalation without leaving.
+  Boundary: Actual or highly explicit intent to leave, cancel, replace, or
+    not renew.
+
+---- 5. agent_tone ----
+(the only agent-focused metric; higher = poorer tone)
+
+Score the MOST RECENT substantive agent message. If the conversation
+contains no agent message, emit 0.0.
+
+The boundary between the two lower bands is decided by a CHECKLIST, not by
+how warm the agent sounds. Count how many of these five are present in
+that message:
+
+  C1. Names the customer's specific issue or object — the pipeline, table,
+      error, or question by name — rather than referring to "your request"
+      or "the issue" generically.
+  C2. Says something about WHY, or what was found or ruled out. Not only
+      what the customer should do next.
+  C3. Takes ownership of a problem or of the next action ("we have
+      escalated", "we are checking", "we caused"), rather than assigning
+      all remaining work to the customer.
+  C4. Gives a concrete next step. A time, date, or named owner counts for
+      more than "we will update you".
+  C5. Addresses every question the customer actually asked in their most
+      recent message. Dropping one is a miss.
+
+LENGTH IS NOT A FACTOR. A two-sentence reply that covers four checks is
+Excellent. A six-paragraph reply that covers one is not. Do not reward
+volume, warmth, apology, or pleasantries — none of them are checks.
+
+[0,1) — Professional / Excellent  → emit 0.0 or 0.5
+  Definition: The agent's message does the job: it identifies what the
+    customer is dealing with, says something substantive about it, and
+    leaves the customer knowing what happens next.
+  Signals: FOUR OR FIVE of C1-C5 present, and no negative-tone language.
+    Emit 0.0 for five checks, 0.5 for four.
+  Does NOT qualify: A message with three or fewer checks, however
+    courteous or apologetic it is.
+  Boundary: Four or more checks present AND no negative-tone language.
+
+[1,2) — Adequate but thin  → emit 1.5
+  Definition: The agent is polite and not doing anything wrong, but the
+    message leaves the customer with less than they needed — a generic
+    acknowledgement, a status ping with no status, or an instruction with
+    no explanation.
+  Signals: THREE OR FEWER of C1-C5 present, and no negative-tone
+    language. Typical cases: "We are looking into this and will update
+    you"; a follow-up that asks for details the customer already
+    supplied; a fix instruction with no reason given; a reply that
+    answers one of two questions asked.
+  Does NOT qualify: Any dismissive, defensive, or blaming language —
+    that is [2,3) or higher regardless of how many checks are present.
+  Boundary: Three or fewer checks present AND no negative-tone language.
+
+[2,3) — Poor / Problematic  → emit 2.5
+  Definition: Agent shows noticeable dismissiveness, defensiveness, lack
+    of ownership, or wording that negatively affects customer experience.
+  Signals: "As I already mentioned"; dismissing concerns; defensive
+    responses; tactless blame; curt or passive-aggressive language;
+    telling the customer to re-read something already sent.
+  Does NOT qualify: Firm correction; stating a product limitation;
+    professional refusal; declining a request with a reason.
+  Boundary: The agent's wording itself creates a noticeable negative
+    experience. The checklist does not apply here — negative language
+    outranks it.
+
+[3,4] — Unprofessional / Harmful  → emit 3.5 or 4.0
+  Definition: Agent uses clearly inappropriate, disrespectful, hostile,
+    sarcastic, dismissive, or accusatory language.
+  Signals: Insults; sarcasm; hostility; mocking; explicit blame;
+    condescension; aggressive dismissal; inappropriate language.
+  Does NOT qualify: Directness, disagreement, or firm boundaries
+    expressed professionally.
+  Boundary: Clear violation of professional or respectful communication
+    standards.
+
+================================================================
+REMAINING METRICS — NOT YET ANCHORED
+================================================================
+
+These two do not yet have anchor tables. Score them on the same 0-4
+scale, using the same global guardrail (explicit evidence only, lowest
+supported band), and emit the same discrete values.
+
+- politeness_erosion: drop in the CUSTOMER's civility (loss of greetings,
+  all-caps, sarcasm, terse replies) in recent messages relative to the
+  CUSTOMER'S OWN earlier baseline in this ticket. The agent's tone does
+  not enter this score. A customer who was terse from their very first
+  message has not eroded — erosion requires a decline from their own
+  established baseline.
+
+- dissatisfaction_trajectory: direction of the CUSTOMER's sentiment across
+  the whole conversation. 0.0 = improving, 2.0 = stable, 4.0 = sharply
+  degrading. This is the only customer-focused metric that looks at the
+  full history rather than the recent window. For this metric you may emit
+  2.0 to mean "stable", in addition to the standard values.
+
+================================================================
+COMMITMENT ANALYSIS — PRE-COMPUTED, DO NOT RECOMPUTE
+================================================================
+
+The engine has already detected every agent commitment in the
+conversation and classified each one as DELIVERED, MISSED, or PENDING
+based on the actual current evaluation time. You do NOT need to detect
+commitments or decide whether they were met. Trust the analysis below.
+
+  COMMITMENT ANALYSIS:
+  {commitment_analysis}
+
+  Current evaluation time: {evaluation_time}
+
+- commitment_to_delivery_ratio: use the engine-computed value from the
+  COMMITMENT ANALYSIS above verbatim. Do not recompute it. PENDING
+  commitments are NOT counted as missed.
+
+Use the commitment counts to inform your scoring of the CUSTOMER metrics
+only where the customer's own language reflects it (e.g., a customer who
+explicitly complains about waiting after a clearly MISSED commitment).
+A missed commitment on its own is not evidence of customer frustration.
+
+================================================================
+CALIBRATION EXAMPLES
+================================================================
+
+frustration
+  "Production ingestion has stopped. Please investigate."
+      → [0,1)   High severity but factual; no expressed frustration.
+  "Production ingestion has been down for 6 hours and this is becoming
+   frustrating."
+      → [2,3)   Explicit frustration.
+  "This is completely unacceptable. We've reported this multiple times and
+   still don't have a resolution."
+      → [3,4]   Strong dissatisfaction and repeated unresolved issue.
+
+urgency
+  "Could you please check why yesterday's sync failed?"
+      → [0,1)   No immediate time pressure.
+  "Could you please prioritize this and let us know the ETA?"
+      → [1,2)   Preference for faster action, but no critical deadline.
+  "This is blocking our daily reporting. We need this resolved today."
+      → [2,3)   Current operational impact and explicit deadline.
+  "Our production pipeline is down and business operations are currently
+   blocked. We need this fixed immediately."
+      → [3,4]   Critical ongoing operational impact.
+
+confusion
+  "Can you confirm whether this connector supports incremental sync?"
+      → [0,1)   Clear, specific question.
+  "I'm not sure why this field isn't appearing. Could you clarify?"
+      → [1,2)   Localized uncertainty.
+  "I'm confused. The dashboard says the sync succeeded, but the data isn't
+   there. Which status should we trust?"
+      → [2,3)   Difficulty reconciling observed behavior.
+  "We don't understand what's happening anymore. We've followed the
+   instructions, but we're seeing different behavior at every step."
+      → [3,4]   Pervasive confusion preventing next action.
+
+churn_threat
+  "The sync is failing again. Can you investigate?"
+      → [0,1)   Complaint without retention signal.
+  "This is unacceptable. Please escalate this to your manager."
+      → [0,1)   Escalation is NOT a churn threat.
+  "We're disappointed that we're still facing these issues."
+      → [1,2)   Dissatisfaction but no departure intent.
+  "If these reliability issues continue, we'll have to start evaluating
+   alternatives."
+      → [2,3)   Explicit consideration of alternatives.
+  "We've decided to move this workload to another provider if this isn't
+   resolved."
+      → [3,4]   Explicit vendor replacement intent.
+
+agent_tone
+  "Thanks for sharing the details. I've reviewed the logs and found the
+   cause. Here's what we recommend."
+      → [0,1)   Professional, clear, and proactive.
+  "I've checked this and the next step is to restart the sync. Please let
+   us know once that's done."
+      → [1,2)   Professional but transactional.
+  "As I mentioned earlier, this is expected behavior. Please review the
+   documentation."
+      → [2,3)   Noticeably curt / dismissive.
+  "You clearly haven't followed the instructions correctly."
+      → [3,4]   Blaming and condescending.
+
+================================================================
+OUTPUT
+================================================================
+
+Return a JSON object with these fields. All eight metric values must be
+floats in [0.0, 4.0], drawn from the discrete set defined above.
+
+- frustration
+- urgency
+- churn_threat
+- confusion
+- politeness_erosion
+- dissatisfaction_trajectory
+- agent_tone
+- commitment_to_delivery_ratio   (engine value, copied verbatim)
+
+Also return:
+- top_signal: the name of the single dominant metric, exactly as spelled
+  above
+- confidence: a float in [0.0, 4.0] expressing your overall confidence in
+  this assessment. 0.0 = highly uncertain (sparse or ambiguous signal);
+  4.0 = high confidence. Use lower values when the conversation is short,
+  ambiguous, or the metric signals conflict.
+- reasoning: 2-3 sentences in plain English explaining the assessment, and
+  UNDER 700 CHARACTERS in total. Name the specific customer or agent language
+  that put each high metric in its band. If a metric is low despite a severe
+  technical issue, say so explicitly. Discuss only the metrics that actually
+  drove the score — do not narrate all eight.
+- commitments_detected: integer, use the engine value from the analysis
+  above
+- commitments_missed: integer, use the engine value from the analysis
+  above; do not count PENDING
+
+Rules:
+- If the conversation is in a language other than English, assess it
+  according to that language's norms.
+- Return valid JSON only. No prose outside the JSON object.
+
+Ticket metadata:
+- Subject: {subject}
+- Channel: {channel}
+- Tags: {tags}
+- Locale: {locale}
+- Priority: {priority}
+
+Conversation (chronological, full history):
+{formatted_messages}

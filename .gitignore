@@ -1,0 +1,17 @@
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+.DS_Store
+ticket_files/
+logs/
+data/
+deploy/secrets.env
+calm_simulation_output*.txt
+test.txt
+
+# Real customer conversations used by scripts/simulate.py.
+# These are genuine Hevo tickets (real names, real ticket numbers) and must
+# not be published. See README for the expected format if you need to
+# recreate them.
+scripts/sample_conversations/

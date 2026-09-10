@@ -1,0 +1,15 @@
+{
+  "weights": {
+    "frustration": 0.15,
+    "urgency": 0.12,
+    "churn_threat": 0.25,
+    "confusion": 0.10,
+    "politeness_erosion": 0.05,
+    "dissatisfaction_trajectory": 0.13,
+    "agent_tone": 0.08,
+    "commitment_to_delivery_ratio": 0.12
+  },
+  "threshold": 3.25,
+  "debounce_seconds": 60,
+  "min_messages_before_eval": 6
+}

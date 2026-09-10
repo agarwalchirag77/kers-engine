@@ -1,0 +1,67 @@
+You are analyzing a customer support conversation to compute an Escalation
+Risk Score (ERS). Your output is consumed by an automated system; respond
+with valid JSON only.
+
+You are given the full conversation history between a customer and one or
+more support agents, with timestamps on every message. Use the timestamps
+— not just the message content — when reasoning about the agent's
+responsiveness and commitments.
+
+Return a JSON object with these fields, each a float in [0.0, 5.0]:
+
+- frustration: customer's emotional intensity, anger, hostility
+- urgency: time-sensitivity or business impact mentioned by the customer
+- churn_threat: explicit or implicit signals of leaving — cancellation,
+  refund, legal action, competitor mentions, threats to go public
+- confusion: customer repeating themselves or re-asking, indicating the
+  agent is not landing the answer
+- politeness_erosion: drop in customer pleasantries, all-caps, sarcasm,
+  terse replies relative to earlier in the conversation
+- dissatisfaction_trajectory: direction across the conversation
+  (0.0 = improving, 2.5 = stable, 5.0 = sharply degrading)
+- agent_tone: agent's professionalism and empathy. Higher = poorer tone
+  (defensive, dismissive, robotic, escalating). 0.0 = excellent tone.
+- commitment_to_delivery_ratio: detect agent commitments — explicit
+  ("I'll respond in 10 minutes", "I'll have an answer by 3 PM") or
+  implicit ("let me check and revert"). For each commitment, use message
+  timestamps to determine whether the agent followed up within the
+  promised window. Return:
+      (missed_commitments / total_commitments) * 5
+  so the value fits the [0, 5] sub-score range. If no commitments
+  were made, return 0.0.
+
+  WORKED EXAMPLE: agent at 10:04 says "give me 10 minutes to fetch the
+  logs"; customer at 10:37 asks "any update?" with no agent message in
+  between. This is one broken commitment.
+
+Also return:
+- top_signal: the name of the single dominant sub-score
+- confidence: a float in [0.0, 5.0] expressing your overall confidence
+  in this assessment. 0.0 = highly uncertain (sparse or ambiguous
+  signal); 5.0 = high confidence. Use lower values when the
+  conversation is short, ambiguous, or the sub-score signals conflict.
+- reasoning: 2-3 sentences in plain English explaining the assessment,
+  including any commitments detected and whether they were honored
+- commitments_detected: integer count of agent commitments found
+- commitments_missed: integer count of those that were broken
+
+Rules:
+- Use message timestamps. They are essential for commitment tracking
+  and trajectory assessment.
+- A calm, brief message that mentions cancellation or refund is high
+  churn_threat. Length alone does not indicate severity.
+- agent_tone is scored independently of customer state — a calm
+  customer with a dismissive agent should still yield non-zero agent_tone.
+- If the conversation is in a language other than English, assess it
+  according to that language's norms.
+- Return valid JSON only. No prose outside the JSON object.
+
+Ticket metadata:
+- Subject: {subject}
+- Channel: {channel}
+- Tags: {tags}
+- Locale: {locale}
+- Priority: {priority}
+
+Conversation (chronological, full history):
+{formatted_messages}
