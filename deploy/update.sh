@@ -165,24 +165,36 @@ git fetch --quiet origin "$BRANCH"
 OLD_SHA="$(git rev-parse HEAD)"
 NEW_SHA="$(git rev-parse "origin/$BRANCH")"
 
+# "The SHAs differ" is not the same as "there is something to pull": a
+# checkout with unpushed local commits is ahead of origin, and a merge
+# --ff-only there is a silent no-op that would look like a real deploy.
+HAVE_UPDATE=0
 if [ "$OLD_SHA" = "$NEW_SHA" ]; then
     info "already at $(git rev-parse --short HEAD) — nothing to pull"
-    if [ "$FORCE" -ne 1 ]; then
-        say "Up to date. Nothing to pull."
-        # Still worth checking: the tunnel hostname drifts independently of
-        # the code, and this is the command people actually run.
-        report_tunnel
-        exit 0
-    fi
-    info "--force given, redeploying the current revision anyway"
-else
+elif git merge-base --is-ancestor "$NEW_SHA" "$OLD_SHA"; then
+    info "local branch is $(git rev-list --count "$NEW_SHA..$OLD_SHA") commit(s) ahead of origin/$BRANCH — nothing to pull"
+elif git merge-base --is-ancestor "$OLD_SHA" "$NEW_SHA"; then
+    HAVE_UPDATE=1
     info "$(git rev-parse --short "$OLD_SHA") -> $(git rev-parse --short "$NEW_SHA")"
     echo
     git --no-pager log --oneline --no-decorate "$OLD_SHA..$NEW_SHA" | sed 's/^/    /'
+else
+    die "local branch has diverged from origin/$BRANCH. Resolve by hand."
+fi
+
+if [ "$HAVE_UPDATE" -eq 0 ] && [ "$FORCE" -ne 1 ]; then
+    say "Up to date. Nothing to pull."
+    # Still worth checking: the tunnel hostname drifts independently of the
+    # code, and this is the command people actually run.
+    report_tunnel
+    exit 0
+fi
+if [ "$HAVE_UPDATE" -eq 0 ]; then
+    info "--force given, redeploying the current revision anyway"
 fi
 
 REQS_CHANGED=0
-if [ "$OLD_SHA" != "$NEW_SHA" ] &&
+if [ "$HAVE_UPDATE" -eq 1 ] &&
    ! git diff --quiet "$OLD_SHA" "$NEW_SHA" -- requirements.txt; then
     REQS_CHANGED=1
 fi
@@ -220,7 +232,7 @@ PY
 fi
 
 # --- update ----------------------------------------------------------------
-if [ "$OLD_SHA" != "$NEW_SHA" ]; then
+if [ "$HAVE_UPDATE" -eq 1 ]; then
     say "Pulling"
     git merge --ff-only --quiet "origin/$BRANCH" ||
         die "fast-forward failed — the local branch has diverged from origin/$BRANCH"
