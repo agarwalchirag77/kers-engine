@@ -1,4 +1,5 @@
 .venv/
+.env
 .pytest_cache/
 __pycache__/
 *.pyc
@@ -7,6 +8,8 @@ ticket_files/
 logs/
 data/
 deploy/secrets.env
+uvicorn.pid
+cloudflared.pid
 calm_simulation_output*.txt
 test.txt
 

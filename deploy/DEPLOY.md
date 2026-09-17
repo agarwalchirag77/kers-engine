@@ -211,6 +211,17 @@ limiting, with a different `code`. Webhooks keep arriving, messages keep
 being stored, and no score is ever produced. Check
 `grep -c ai_response_invalid logs/engine-*.jsonl` periodically.
 
+**8. A systemd unit with the wrong path crash-loops instead of failing.**
+`StartLimitBurst` and `StartLimitIntervalSec` are `[Unit]` directives. They
+were in `[Service]`, where systemd ignores them with an `Unknown key`
+warning — so a unit pointing at a path that did not exist restarted every
+5s, 232 times, instead of failing visibly after 5 attempts. Both are now in
+`[Unit]`, and `install-systemd.sh` renders the paths rather than assuming
+them. If a unit will not start, read the first two lines of
+`journalctl -u kers-engine` — `Failed to load environment files` means
+`EnvironmentFile` is wrong, `Failed to spawn 'start' task` means `ExecStart`
+is wrong. Both mean the paths were never rendered for this host.
+
 ## Operating
 
 ```bash
@@ -218,7 +229,27 @@ being stored, and no score is ever produced. Check
 ./deploy/stop.sh           # stop engine, leave tunnel up
 ./deploy/stop.sh --all     # stop both
 ./deploy/tunnel.sh         # start tunnel, print the URL
+./deploy/update.sh         # pull, test, restart, verify — with rollback
 ```
+
+### Deploying a change
+
+```bash
+./deploy/update.sh --dry-run   # what would be pulled
+./deploy/update.sh             # do it
+```
+
+`update.sh` fetches, snapshots the SQLite DB, fast-forwards, reinstalls
+dependencies only if `requirements.txt` changed, runs the tests, restarts the
+engine (systemd if the unit is installed, otherwise `stop.sh`/`start.sh`), and
+waits for `/health`. If the new revision does not come up it prints the
+failure, resets the tree to the previous commit, restarts and re-verifies.
+Tests run *before* any restart, so a failing revision never reaches the
+running service.
+
+It deliberately **does not restart the tunnel**. Under a quick tunnel that
+would hand out a new hostname and silently break the helpdesk webhook — a
+code deploy must not do that as a side effect. See gotcha 4.
 
 Restarting the engine takes about two seconds. Webhooks that land in that
 window are retried by the helpdesk, so a restart during normal traffic is
@@ -238,17 +269,25 @@ and then you can stop thinking about it.
 
 ```bash
 cd ~/kers-engine
-
-# Point the units at this host: replace the user and paths if not khushi.s
-sed -i "s|khushi.s|$USER|g" deploy/systemd/*.service
-
-sudo cp deploy/systemd/kers-engine.service /etc/systemd/system/
-sudo cp deploy/systemd/kers-tunnel.service /etc/systemd/system/
-sudo systemctl daemon-reload
+./deploy/install-systemd.sh --with-tunnel
 
 sudo systemctl enable --now kers-engine
 sudo systemctl enable --now kers-tunnel
 ```
+
+`install-systemd.sh` derives the user, the install path and the cloudflared
+location from the checkout it is run in, renders the unit templates and
+installs them. Check what it produced before starting:
+
+```bash
+systemctl cat kers-engine | grep -E 'WorkingDirectory|ExecStart|EnvironmentFile'
+```
+
+An earlier version of this runbook said `sed -i "s|khushi.s|$USER|g"`. That
+fixed only the *username* and left every path as `/home/<user>/kers-engine`,
+so any checkout not sitting directly in `$HOME` produced a unit that failed
+with `Failed to load environment files` and `Failed to spawn 'start' task`.
+See gotcha 8.
 
 `enable` is what makes it come back after a reboot; `--now` starts it
 immediately.

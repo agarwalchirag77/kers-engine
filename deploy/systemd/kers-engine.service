@@ -6,23 +6,31 @@ Documentation=https://github.com/hevoio/kers-engine
 After=network-online.target
 Wants=network-online.target
 
+# Don't thrash if it is crash-looping on a bad config — fail loudly instead so
+# `systemctl status` shows a clear failure rather than an endless restart.
+# These are [Unit] directives: in [Service] systemd ignores them with an
+# "Unknown key" warning and the limiter never applies, so a broken unit
+# restarts forever instead of failing visibly.
+StartLimitBurst=5
+StartLimitIntervalSec=120
+
 [Service]
 Type=exec
 
-# --- edit these three for the host ---
-User=khushi.s
-Group=khushi.s
-WorkingDirectory=/home/khushi.s/kers-engine
-# -------------------------------------
+# --- rendered by deploy/install-systemd.sh; do not edit by hand ---
+User=__KERS_USER__
+Group=__KERS_USER__
+WorkingDirectory=__KERS_ROOT__
+# -----------------------------------------------------------------------------------------------------
 
 # Default port. Listed BEFORE EnvironmentFile so a value in .env overrides it.
 Environment=ERS_PORT=8080
 
 # Credentials. systemd parses this itself, so no `set -a; source` dance, and
 # the values never appear in the process list.
-EnvironmentFile=/home/khushi.s/kers-engine/.env
+EnvironmentFile=__KERS_ROOT__/.env
 
-ExecStart=/home/khushi.s/kers-engine/.venv/bin/uvicorn app.main:app \
+ExecStart=__KERS_ROOT__/.venv/bin/uvicorn app.main:app \
     --host 127.0.0.1 --port ${ERS_PORT} \
     --log-config uvicorn_log_config.json
 
@@ -30,11 +38,6 @@ ExecStart=/home/khushi.s/kers-engine/.venv/bin/uvicorn app.main:app \
 # a crash, and come back after a reboot.
 Restart=always
 RestartSec=5s
-
-# Don't thrash if it is crash-looping on a bad config — fail loudly instead so
-# `systemctl status` shows a clear failure rather than an endless restart.
-StartLimitBurst=5
-StartLimitIntervalSec=120
 
 # Logs go to journald: `journalctl -u kers-engine -f`. The engine's own JSONL
 # event log is separate and still lands in logs/.
@@ -47,7 +50,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=/home/khushi.s/kers-engine
+ReadWritePaths=__KERS_ROOT__
 
 [Install]
 WantedBy=multi-user.target

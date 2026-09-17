@@ -4,20 +4,28 @@ Documentation=https://github.com/hevoio/kers-engine
 After=network-online.target kers-engine.service
 Wants=network-online.target
 
+# Don't thrash if it is crash-looping on a bad config — fail loudly instead so
+# `systemctl status` shows a clear failure rather than an endless restart.
+# These are [Unit] directives: in [Service] systemd ignores them with an
+# "Unknown key" warning and the limiter never applies, so a broken unit
+# restarts forever instead of failing visibly.
+StartLimitBurst=5
+StartLimitIntervalSec=120
+
 [Service]
 Type=exec
 
-# --- edit these for the host ---
-User=khushi.s
-Group=khushi.s
-WorkingDirectory=/home/khushi.s/kers-engine
-# -------------------------------
+# --- rendered by deploy/install-systemd.sh; do not edit by hand ---
+User=__KERS_USER__
+Group=__KERS_USER__
+WorkingDirectory=__KERS_ROOT__
+# ------------------------------------------------------------------
 
 # Port default, overridden by .env if it sets ERS_PORT. The leading `-` on
 # EnvironmentFile makes a missing .env non-fatal — the tunnel does not need
 # credentials, only the port.
 Environment=ERS_PORT=8080
-EnvironmentFile=-/home/khushi.s/kers-engine/.env
+EnvironmentFile=-__KERS_ROOT__/.env
 
 # --no-autoupdate is mandatory. Without it cloudflared replaces its own
 # binary once a day and exits, expecting to be restarted. Under systemd it
@@ -26,7 +34,7 @@ EnvironmentFile=-/home/khushi.s/kers-engine/.env
 #
 # Run via sh so ${ERS_PORT} expands reliably inside the URL argument, and so
 # the tunnel always follows whatever port the engine is configured for.
-ExecStart=/bin/sh -c 'exec /home/khushi.s/bin/cloudflared tunnel \
+ExecStart=/bin/sh -c 'exec __CLOUDFLARED__ tunnel \
     --no-autoupdate --url "http://localhost:${ERS_PORT:-8080}"'
 
 Restart=always
@@ -42,7 +50,7 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 
-# ---------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------------------------------------------------------------
 # READ THIS BEFORE RELYING ON AUTO-RESTART
 #
 # With a QUICK tunnel (the --url form above), every restart produces a new
@@ -59,10 +67,10 @@ WantedBy=multi-user.target
 #
 # then replace ExecStart above with:
 #
-#   ExecStart=/home/khushi.s/bin/cloudflared tunnel --no-autoupdate run kers
+#   ExecStart=__CLOUDFLARED__ tunnel --no-autoupdate run kers
 #
 # After that the webhook URL never changes again and this unit is a complete
 # solution. Until then, check the URL after any restart:
 #
 #   journalctl -u kers-tunnel | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1
-# ---------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------------------------------------------------------------
