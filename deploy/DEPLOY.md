@@ -230,6 +230,7 @@ is wrong. Both mean the paths were never rendered for this host.
 ./deploy/stop.sh --all     # stop both
 ./deploy/tunnel.sh         # start tunnel, print the URL
 ./deploy/update.sh         # pull, test, restart, verify — with rollback
+./deploy/update.sh --check-tunnel   # print the current webhook URL
 ```
 
 ### Deploying a change
@@ -250,6 +251,32 @@ running service.
 It deliberately **does not restart the tunnel**. Under a quick tunnel that
 would hand out a new hostname and silently break the helpdesk webhook — a
 code deploy must not do that as a side effect. See gotcha 4.
+
+It does, however, **report the tunnel URL on every run** — including
+`--dry-run` and runs with nothing to pull. It remembers the hostname it last
+reported in `data/tunnel-url` and prints a loud banner with the exact
+endpoint to register whenever it differs:
+
+```
+==> TUNNEL URL CHANGED — UPDATE THE HELPDESK WEBHOOK
+    was  https://old-name-here.trycloudflare.com
+    now  https://new-name-here.trycloudflare.com
+
+    Set the helpdesk webhook endpoint to:
+
+      https://new-name-here.trycloudflare.com/webhooks/zendesk/events
+```
+
+The hostname drifts independently of the code — a reboot or a cloudflared
+crash-restart is enough — so check it after any restart, not just after a
+deploy:
+
+```bash
+./deploy/update.sh --check-tunnel
+```
+
+That is a read-only query: it works on a dirty checkout and changes
+nothing but the recorded hostname.
 
 Restarting the engine takes about two seconds. Webhooks that land in that
 window are retried by the helpdesk, so a restart during normal traffic is
