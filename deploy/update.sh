@@ -8,6 +8,7 @@
 #   ./deploy/update.sh --force      redeploy even if there are no new commits
 #   ./deploy/update.sh --skip-tests skip pytest before restarting
 #   ./deploy/update.sh --no-restart update the working tree only
+#   ./deploy/update.sh --check-tunnel  report the tunnel URL and exit
 #
 # Deliberately does NOT touch kers-tunnel. Under a Cloudflare *quick* tunnel
 # every cloudflared restart hands out a NEW random hostname, which silently
@@ -35,14 +36,15 @@ rm -f "${KERS_UPDATE_TMP:-}"
 cd "$(dirname "${KERS_UPDATE_ORIGIN}")/.."
 ROOT="$(pwd)"
 
-DRY_RUN=0 FORCE=0 SKIP_TESTS=0 NO_RESTART=0
+DRY_RUN=0 FORCE=0 SKIP_TESTS=0 NO_RESTART=0 CHECK_TUNNEL=0
 for arg in "$@"; do
     case "$arg" in
-        --dry-run)    DRY_RUN=1 ;;
-        --force)      FORCE=1 ;;
-        --skip-tests) SKIP_TESTS=1 ;;
-        --no-restart) NO_RESTART=1 ;;
-        -h|--help)    awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' \
+        --dry-run)      DRY_RUN=1 ;;
+        --force)        FORCE=1 ;;
+        --skip-tests)   SKIP_TESTS=1 ;;
+        --no-restart)   NO_RESTART=1 ;;
+        --check-tunnel) CHECK_TUNNEL=1 ;;
+        -h|--help)      awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' \
                           "$KERS_UPDATE_ORIGIN"; exit 0 ;;
         *)            echo "unknown option: $arg (try --help)" >&2; exit 2 ;;
     esac
@@ -58,13 +60,6 @@ say "Preflight"
 [ -d .git ]           || die "$ROOT is not a git checkout"
 [ -f .env ]           || die ".env not found. See deploy/DEPLOY.md step 3."
 [ -x .venv/bin/python ] || die ".venv missing. See deploy/DEPLOY.md step 2."
-
-# Uncommitted tracked changes would be clobbered or would block the pull.
-# .env, data/, logs/ and ticket_files/ are gitignored and unaffected.
-if ! git diff --quiet || ! git diff --cached --quiet; then
-    git status --short
-    die "uncommitted changes to tracked files. Commit, stash or discard them first."
-fi
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 [ "$BRANCH" != "HEAD" ] || die "detached HEAD. Check out a branch first."
@@ -82,6 +77,87 @@ info "branch  $BRANCH"
 info "port    $PORT"
 info "mode    $MODE"
 
+# --- tunnel URL -----------------------------------------------------------
+# A Cloudflare *quick* tunnel gets a new random hostname every time
+# cloudflared restarts — a reboot, a crash-restart, an auto-update. systemd
+# brings the process back, the helpdesk stays pointed at the dead hostname,
+# and nothing on this host looks wrong: /health is 200 and the engine is
+# happily running, receiving nothing. So: remember the hostname we last
+# reported, and shout when it differs.
+TUNNEL_STATE="$ROOT/data/tunnel-url"
+
+current_tunnel_url() {
+    local since out
+    if [ "$MODE" = systemd ]; then
+        systemctl is-active --quiet kers-tunnel 2>/dev/null || return 0
+        # Scope to the current invocation, so a stale URL from a previous
+        # run of the tunnel is never reported as live.
+        since="$(systemctl show kers-tunnel -p ActiveEnterTimestamp --value 2>/dev/null || true)"
+        if [ -n "$since" ]; then
+            out="$(journalctl -u kers-tunnel --since "$since" --no-pager 2>/dev/null || true)"
+        else
+            out="$(journalctl -u kers-tunnel --no-pager 2>/dev/null || true)"
+        fi
+    else
+        [ -f logs/cloudflared.out ] || return 0
+        [ -f cloudflared.pid ] || return 0
+        ps -p "$(cat cloudflared.pid)" >/dev/null 2>&1 || return 0
+        out="$(cat logs/cloudflared.out)"
+    fi
+    printf '%s\n' "$out" | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1
+}
+
+report_tunnel() {
+    local url prev endpoint
+    url="$(current_tunnel_url)"
+    prev=""
+    if [ -f "$TUNNEL_STATE" ]; then prev="$(cat "$TUNNEL_STATE")"; fi
+
+    if [ -z "$url" ]; then
+        say "Tunnel"
+        if [ "$MODE" = systemd ] && systemctl is-active --quiet kers-tunnel 2>/dev/null; then
+            info "running, but no quick-tunnel hostname in its log"
+            info "(a named tunnel keeps a fixed hostname — nothing to re-register)"
+        else
+            info "not running — the helpdesk cannot reach this engine"
+            info "start it:  sudo systemctl start kers-tunnel"
+        fi
+        return 0
+    fi
+
+    endpoint="$url/webhooks/zendesk/events"
+
+    if [ "$url" = "$prev" ]; then
+        say "Tunnel unchanged"
+        info "$endpoint"
+        info "already registered in the helpdesk — no action needed"
+        return 0
+    fi
+
+    printf '\n\033[33m==> TUNNEL URL CHANGED — UPDATE THE HELPDESK WEBHOOK\033[0m\n'
+    if [ -n "$prev" ]; then info "was  $prev"; else info "was  (never recorded)"; fi
+    info "now  $url"
+    echo
+    info "Set the helpdesk webhook endpoint to:"
+    printf '\n      \033[1m%s\033[0m\n\n' "$endpoint"
+    info "Until you do, no webhook arrives and no ticket is scored —"
+    info "and nothing on this host will look wrong."
+    mkdir -p "$(dirname "$TUNNEL_STATE")"
+    printf '%s\n' "$url" > "$TUNNEL_STATE"
+}
+
+if [ "$CHECK_TUNNEL" -eq 1 ]; then
+    report_tunnel
+    exit 0
+fi
+
+# Uncommitted tracked changes would be clobbered or would block the pull.
+# .env, data/, logs/ and ticket_files/ are gitignored and unaffected.
+if ! git diff --quiet || ! git diff --cached --quiet; then
+    git status --short
+    die "uncommitted changes to tracked files. Commit, stash or discard them first."
+fi
+
 # --- what is incoming ------------------------------------------------------
 say "Fetching"
 git fetch --quiet origin "$BRANCH"
@@ -92,7 +168,10 @@ NEW_SHA="$(git rev-parse "origin/$BRANCH")"
 if [ "$OLD_SHA" = "$NEW_SHA" ]; then
     info "already at $(git rev-parse --short HEAD) — nothing to pull"
     if [ "$FORCE" -ne 1 ]; then
-        say "Up to date. Nothing to do."
+        say "Up to date. Nothing to pull."
+        # Still worth checking: the tunnel hostname drifts independently of
+        # the code, and this is the command people actually run.
+        report_tunnel
         exit 0
     fi
     info "--force given, redeploying the current revision anyway"
@@ -114,6 +193,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     if [ "$REQS_CHANGED" -eq 1 ]; then
         info "requirements.txt changed; a real run would reinstall deps"
     fi
+    report_tunnel
     exit 0
 fi
 
@@ -174,6 +254,7 @@ fi
 if [ "$NO_RESTART" -eq 1 ]; then
     say "Updated, not restarting (--no-restart)"
     info "the engine is still running the old code until you restart it"
+    report_tunnel
     exit 0
 fi
 
@@ -235,8 +316,7 @@ info "revision  $(git rev-parse --short HEAD)  $(git log -1 --pretty=%s)"
 info "prompt    $(.venv/bin/python -c 'from app.config import PROMPT_VERSION; print(PROMPT_VERSION)')"
 info "health    200 on 127.0.0.1:$PORT"
 
-if [ "$MODE" = systemd ] && systemctl is-active --quiet kers-tunnel; then
-    echo
-    info "kers-tunnel was left running and its hostname is unchanged —"
-    info "no need to re-register the webhook for this deploy."
-fi
+# The tunnel was not restarted by this deploy, but its hostname may have
+# drifted since it was last registered — a reboot or a cloudflared
+# crash-restart is enough. Report it either way.
+report_tunnel
