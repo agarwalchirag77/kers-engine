@@ -9,6 +9,10 @@ the helpdesk's own trigger system can act on it.
 KERS does not message customers and does not assign work. It produces one
 number per ticket and lets the existing workflow decide what to do with it.
 
+**Taking this over, or deploying it for the first time?** Read
+[HANDOVER.md](HANDOVER.md) — local setup, the deploy process, what to monitor,
+and the traps that have broken real deployments.
+
 ---
 
 ## How it works
