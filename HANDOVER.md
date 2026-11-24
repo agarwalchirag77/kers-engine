@@ -143,9 +143,15 @@ in `app/connectors/zendesk/settings.json`. Group and tag scope lives in
 `filters.json`.
 
 > The API token in `.env` must belong to the `api_user` named in
-> `settings.json`. If it doesn't, the engine scores normally and *every push
-> 401s* — visible only as `push_failed` in the JSONL log. That user is
-> currently a named individual, not a service account; see open items.
+> `settings.json`, **and that account must keep agent permission to edit
+> tickets.** If the token doesn't match the user, every push `401`s. If the
+> account is still valid but has lost ticket-edit rights — e.g. it was
+> downgraded to a Zendesk **Light agent** (a common offboarding step, since
+> Light agents can view tickets but not modify them) — every push `403`s
+> instead. Both are silent: the engine scores normally and the failure shows
+> only as `push_failed` in the JSONL log. Use a dedicated service account,
+> never a named individual (see open items) — a Nov 2026 outage came from
+> exactly this.
 
 Chat (messaging) tickets deliberately **bypass the group whitelist**. Only
 excluded tags can stop a chat ticket from being processed.
@@ -361,7 +367,7 @@ webhook_received → message_appended → debounce_scheduled
 |---|---|---|
 | No webhooks arriving | Tunnel hostname drifted after a restart | `./deploy/update.sh --check-tunnel` |
 | Everything 401s | `ZENDESK_WEBHOOK_SECRET` set but the helpdesk isn't signing with it | `grep -c '401' logs/uvicorn.out` |
-| Scores computed, never appear on tickets | API token doesn't belong to the configured `api_user` | `grep -c push_failed logs/engine-*.jsonl` |
+| Scores computed, never appear on tickets | `api_user` can't write the ticket — token doesn't match it (`401`), **or the account lost ticket-edit rights, e.g. downgraded to a Zendesk Light agent (`403`)** | `grep -c push_failed logs/engine-*.jsonl` |
 | Webhooks arrive, no score ever produced | Model API balance exhausted — returns 429, the same status as rate limiting | `grep -c ai_response_invalid logs/engine-*.jsonl` |
 
 ### Is it actually scoring?
@@ -451,6 +457,18 @@ attempts. Fixed.
 **A wrong webhook secret looks exactly like silence.** A stale
 `ZENDESK_WEBHOOK_SECRET` made every webhook 401 for fourteen hours. Nothing
 errored; the engine was healthy and simply received nothing valid.
+
+**A departed owner's account silently kills every push.** `api_user` was a
+named individual who left; their account was downgraded to a Zendesk **Light
+agent**, which can view tickets but not edit them. The token still
+authenticated — so no `401`, no error anywhere — but every ticket-field write
+returned `403`, and scores computed and landed in the DB (`pushed_to_zd=0`)
+while never appearing on a single ticket. Diagnosed entirely from Zendesk:
+inbound webhooks were all `200`, a `ticket.comment_added` showed
+`{"status":"queued"}`, and the agent's role read **Light agent**. Fixed by
+moving `api_user` to a dedicated service account. Restoring a departed user's
+full-agent role works, but only as a stopgap — it breaks again the moment their
+account is deleted.
 
 **`pkill -f` kills your own SSH session.** `pkill -f cloudflared` matches the
 command line of the shell you typed it in. Use the pidfiles, or `pgrep -x`
