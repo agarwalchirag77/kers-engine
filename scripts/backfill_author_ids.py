@@ -34,6 +34,11 @@ import httpx
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from app.connectors.zendesk.oauth import (  # noqa: E402
+    ZendeskOAuthError,
+    oauth_sync_from_config,
+)
+
 TICKET_DIR = ROOT / "ticket_files"
 DIRECTORY = ROOT / "data" / "agent_directory.json"
 ZD = json.loads((ROOT / "app" / "connectors" / "zendesk" / "settings.json").read_text())
@@ -53,11 +58,19 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    token = os.environ.get(ZD["api_token_env_var"])
-    if not token:
-        print("ERROR: %s not set" % ZD["api_token_env_var"], file=sys.stderr)
+    try:
+        oauth = oauth_sync_from_config(ZD)
+    except ZendeskOAuthError as e:
+        print("ERROR: %s" % e, file=sys.stderr)
         sys.exit(1)
-    auth = (ZD["api_user"] + "/token", token)
+
+    def zget(url, **kw):
+        """GET with an OAuth bearer token, refreshing once on a 401."""
+        r = httpx.get(url, headers=oauth.auth_header(), **kw)
+        if r.status_code == 401:
+            r = httpx.get(url, headers=oauth.auth_header(force_refresh=True), **kw)
+        return r
+
     base = "https://" + ZD["subdomain"] + ".zendesk.com/api/v2"
 
     files = sorted(TICKET_DIR.glob("*.json"))
@@ -86,12 +99,12 @@ def main():
             continue
 
         try:
-            r = httpx.get(base + "/tickets/" + tid + "/comments.json", auth=auth, timeout=30)
+            r = zget(base + "/tickets/" + tid + "/comments.json", timeout=30)
             if r.status_code != 200:
                 stats["fetch_failed"] += 1
                 continue
             comments = r.json().get("comments", [])
-            t = httpx.get(base + "/tickets/" + tid + ".json", auth=auth, timeout=30)
+            t = zget(base + "/tickets/" + tid + ".json", timeout=30)
             requester = t.json()["ticket"].get("requester_id") if t.status_code == 200 else None
         except Exception:
             stats["fetch_failed"] += 1

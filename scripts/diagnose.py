@@ -146,8 +146,9 @@ def verdict(db: dict, log: dict) -> list[str]:
         )
     if cnt("missing_env"):
         lines.append(
-            "missing_env logged -> OPENAI_API_KEY or ZENDESK_API_TOKEN not set "
-            "in the engine's environment. Scores can't be computed or pushed."
+            "missing_env logged -> OPENAI_API_KEY or the Zendesk OAuth client "
+            "credentials (ZENDESK_OAUTH_CLIENT_ID/ZENDESK_OAUTH_CLIENT_SECRET) "
+            "not set in the engine's environment. Scores can't be computed or pushed."
         )
 
     if log.get("exists") and cnt("webhook_received") == 0:
@@ -173,10 +174,11 @@ def verdict(db: dict, log: dict) -> list[str]:
     elif cnt("ers_computed") > 0 and cnt("push_failed") > 0 and cnt("pushed_to_zd") == 0:
         lines.append(
             "Scores compute but every push fails (push_failed) -> Zendesk push "
-            "auth. The api_user is a named individual (khushi.s). Check that "
-            "account is active and ZENDESK_API_TOKEN belongs to it, and that "
-            "the ERS custom field still exists. DB rows ARE written with "
-            "pushed_to_zd=0."
+            "auth. Check the OAuth client: a 401 means the client secret is "
+            "wrong/rotated; a 403 means its identity can't edit tickets (needs "
+            "tickets:write scope and an edit-capable role). Also confirm the ERS "
+            "custom field still exists. DB rows ARE written with pushed_to_zd=0 "
+            "(inspect push_error above)."
         )
     elif cnt("db_written") > 0:
         lines.append(

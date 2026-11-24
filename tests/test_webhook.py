@@ -570,7 +570,8 @@ def test_events_endpoint_rejects_malformed_json(tmp_path):
 def test_health_endpoint(monkeypatch, tmp_path):
     """Sanity check for the real app's /health route."""
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setenv("ZENDESK_API_TOKEN", "test-token")
+    monkeypatch.setenv("ZENDESK_OAUTH_CLIENT_ID", "kers_engine")
+    monkeypatch.setenv("ZENDESK_OAUTH_CLIENT_SECRET", "test-secret")
     monkeypatch.setenv("ERS_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("ERS_TICKET_DIR", str(tmp_path / "tickets"))
     monkeypatch.setenv("ERS_LOG_DIR", str(tmp_path / "logs"))

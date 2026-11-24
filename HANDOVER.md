@@ -138,20 +138,22 @@ adding another helpdesk means adding a sibling connector.
 | `deploy/` | Runbook, start/stop/tunnel/update scripts, systemd unit templates |
 | `scripts/` | Operational tools — see below |
 
-Helpdesk instance configuration — subdomain, custom field id, API user — lives
-in `app/connectors/zendesk/settings.json`. Group and tag scope lives in
-`filters.json`.
+Helpdesk instance configuration — subdomain, custom field id, OAuth client
+config — lives in `app/connectors/zendesk/settings.json`. Group and tag scope
+lives in `filters.json`.
 
-> The API token in `.env` must belong to the `api_user` named in
-> `settings.json`, **and that account must keep agent permission to edit
-> tickets.** If the token doesn't match the user, every push `401`s. If the
-> account is still valid but has lost ticket-edit rights — e.g. it was
-> downgraded to a Zendesk **Light agent** (a common offboarding step, since
-> Light agents can view tickets but not modify them) — every push `403`s
-> instead. Both are silent: the engine scores normally and the failure shows
-> only as `push_failed` in the JSONL log. Use a dedicated service account,
-> never a named individual (see open items) — a Nov 2026 outage came from
-> exactly this.
+> The engine authenticates to Zendesk with an **OAuth client**
+> (client-credentials grant; Zendesk has retired API-token Basic auth). Set
+> `ZENDESK_OAUTH_CLIENT_ID` and `ZENDESK_OAUTH_CLIENT_SECRET` in `.env`; the
+> client must carry the **`tickets:write`** scope and an identity that can edit
+> tickets. The engine fetches a short-lived bearer token (≈30 min) from
+> `https://<subdomain>.zendesk.com/oauth/tokens`, caches it, and refreshes it.
+> Two silent push failures: a wrong/rotated **secret** makes every push `401`;
+> an identity that lacks ticket-edit rights or the scope makes every push
+> `403`. Both are quiet — the engine scores normally and the failure shows only
+> as `push_failed` in the JSONL log. A Nov 2026 outage came from the `403` case,
+> back when auth was a named individual's API token and their account was
+> downgraded to a Zendesk Light agent on offboarding.
 
 Chat (messaging) tickets deliberately **bypass the group whitelist**. Only
 excluded tags can stop a chat ticket from being processed.
@@ -180,7 +182,8 @@ dummies unless you're exercising a real model call.
 
 ```
 OPENAI_API_KEY=sk-...
-ZENDESK_API_TOKEN=...
+ZENDESK_OAUTH_CLIENT_ID=kers_engine
+ZENDESK_OAUTH_CLIENT_SECRET=...
 ZENDESK_WEBHOOK_SECRET=
 ERS_PORT=8080
 ```
@@ -367,7 +370,7 @@ webhook_received → message_appended → debounce_scheduled
 |---|---|---|
 | No webhooks arriving | Tunnel hostname drifted after a restart | `./deploy/update.sh --check-tunnel` |
 | Everything 401s | `ZENDESK_WEBHOOK_SECRET` set but the helpdesk isn't signing with it | `grep -c '401' logs/uvicorn.out` |
-| Scores computed, never appear on tickets | `api_user` can't write the ticket — token doesn't match it (`401`), **or the account lost ticket-edit rights, e.g. downgraded to a Zendesk Light agent (`403`)** | `grep -c push_failed logs/engine-*.jsonl` |
+| Scores computed, never appear on tickets | OAuth push identity can't write the ticket — secret wrong/rotated (`401`), **or the identity lacks `tickets:write` / edit rights, e.g. downgraded to a Zendesk Light agent (`403`)** | `grep -c push_failed logs/engine-*.jsonl` |
 | Webhooks arrive, no score ever produced | Model API balance exhausted — returns 429, the same status as rate limiting | `grep -c ai_response_invalid logs/engine-*.jsonl` |
 
 ### Is it actually scoring?
@@ -466,9 +469,10 @@ returned `403`, and scores computed and landed in the DB (`pushed_to_zd=0`)
 while never appearing on a single ticket. Diagnosed entirely from Zendesk:
 inbound webhooks were all `200`, a `ticket.comment_added` showed
 `{"status":"queued"}`, and the agent's role read **Light agent**. Fixed by
-moving `api_user` to a dedicated service account. Restoring a departed user's
-full-agent role works, but only as a stopgap — it breaks again the moment their
-account is deleted.
+migrating the push off API-token Basic auth to an **OAuth client**
+(client-credentials, `tickets:write`), removing the dependency on any one
+person's account. Restoring a departed user's full-agent role works, but only
+as a stopgap — it breaks again the moment their account is deleted.
 
 **`pkill -f` kills your own SSH session.** `pkill -f cloudflared` matches the
 command line of the shell you typed it in. Use the pidfiles, or `pgrep -x`
@@ -495,9 +499,10 @@ Known and deliberately not done, roughly in order of how much they matter.
 2. **A permanent webhook URL.** Direct exposure or a named tunnel. Removes the
    single largest source of outages in this service's history.
 
-3. **Decouple from one person's helpdesk account.** `api_user` in
-   `settings.json` is a named individual. A service account would survive them
-   leaving.
+3. **~~Decouple from one person's helpdesk account.~~** Done (Nov 2026): the
+   push authenticates via an OAuth client (`tickets:write`), not a named
+   individual's API token. Keep the OAuth client owned by a role/service
+   identity, not a personal account, so it survives offboarding.
 
 4. **`_seen_events` grows unbounded.** The in-memory dedup set never evicts.
    Harmless at current volume over weeks; worth a bounded structure before a

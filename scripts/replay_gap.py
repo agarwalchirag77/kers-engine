@@ -53,6 +53,7 @@ from app.config import (  # noqa: E402
     load_weight_config,
     load_zendesk_config,
 )
+from app.connectors.zendesk.oauth import oauth_from_config  # noqa: E402
 from app.connectors.zendesk.pusher import ZendeskPusherHTTP  # noqa: E402
 from app.ers import compute_ers  # noqa: E402
 from app.models import ConversationContext, Message, TicketMetadata  # noqa: E402
@@ -222,7 +223,7 @@ async def main():
         print("\nnothing to replay; already caught up.")
         return
 
-    for var in ("OPENAI_API_KEY", "ZENDESK_API_TOKEN"):
+    for var in ("OPENAI_API_KEY", "ZENDESK_OAUTH_CLIENT_ID", "ZENDESK_OAUTH_CLIENT_SECRET"):
         if not os.environ.get(var):
             print(f"ERROR: {var} not set", file=sys.stderr)
             sys.exit(1)
@@ -231,8 +232,8 @@ async def main():
     db = Database(DB_PATH)
     ai = OpenAIClient(api_key=os.environ["OPENAI_API_KEY"], model=DEFAULT_MODEL)
     pusher = ZendeskPusherHTTP(
-        subdomain=zd["subdomain"], api_user=zd["api_user"],
-        api_token=os.environ[zd["api_token_env_var"]],
+        subdomain=zd["subdomain"],
+        oauth=oauth_from_config(zd),
         custom_field_id=zd["ers_custom_field_id"],
     )
     sem = asyncio.Semaphore(CONCURRENCY)

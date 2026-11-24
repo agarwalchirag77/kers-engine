@@ -6,7 +6,8 @@ Use after a fresh deploy where the DB is empty but ticket_files/ are hydrated
 (e.g., after `restore_ticket_files.py`). Idempotency: rows are stamped with
 evaluated_at now; running twice will just create two rows per ticket.
 
-Environment: reads OPENAI_API_KEY, ZENDESK_API_TOKEN from `.env` (already
+Environment: reads OPENAI_API_KEY and the Zendesk OAuth client credentials
+ZENDESK_OAUTH_CLIENT_ID/ZENDESK_OAUTH_CLIENT_SECRET from `.env` (already
 sourced by the shell) or from OS env.
 """
 from __future__ import annotations
@@ -29,6 +30,7 @@ from app.config import (  # noqa: E402
     load_weight_config,
     load_zendesk_config,
 )
+from app.connectors.zendesk.oauth import oauth_from_config  # noqa: E402
 from app.connectors.zendesk.pusher import ZendeskPusherHTTP  # noqa: E402
 from app.ers import compute_ers  # noqa: E402
 from app.storage.db import Database  # noqa: E402
@@ -86,7 +88,7 @@ async def score_one(
 
 
 async def main():
-    for env_var in ("OPENAI_API_KEY", "ZENDESK_API_TOKEN"):
+    for env_var in ("OPENAI_API_KEY", "ZENDESK_OAUTH_CLIENT_ID", "ZENDESK_OAUTH_CLIENT_SECRET"):
         if not os.environ.get(env_var):
             print(f"ERROR: {env_var} not set", file=sys.stderr)
             sys.exit(1)
@@ -101,8 +103,7 @@ async def main():
     )
     zd_pusher = ZendeskPusherHTTP(
         subdomain=zd_config["subdomain"],
-        api_user=zd_config["api_user"],
-        api_token=os.environ[zd_config["api_token_env_var"]],
+        oauth=oauth_from_config(zd_config),
         custom_field_id=zd_config["ers_custom_field_id"],
     )
 
