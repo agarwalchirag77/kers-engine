@@ -1,7 +1,12 @@
 {
   "subdomain": "hevodata",
   "ers_custom_field_id": 59394819128089,
-  "api_user": "khushi.s@hevodata.com",
-  "api_token_env_var": "ZENDESK_API_TOKEN",
+  "auth": {
+    "method": "oauth",
+    "grant_type": "client_credentials",
+    "scope": "tickets:write tickets:read",
+    "client_id_env": "ZENDESK_OAUTH_CLIENT_ID",
+    "client_secret_env": "ZENDESK_OAUTH_CLIENT_SECRET"
+  },
   "webhook_signature_env_var": "ZENDESK_WEBHOOK_SECRET"
 }

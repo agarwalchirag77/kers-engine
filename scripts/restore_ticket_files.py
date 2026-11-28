@@ -1,8 +1,9 @@
 """Restore ticket_files from Zendesk for all currently-active tickets in
 KERS's monitored groups.
 
-Runs on the REMOTE server (needs ZENDESK_API_TOKEN in env, and reads
-app/config/zendesk.json + app/config/filters.json to know scope).
+Runs on the REMOTE server (needs the Zendesk OAuth client credentials
+ZENDESK_OAUTH_CLIENT_ID/ZENDESK_OAUTH_CLIENT_SECRET in env, and reads
+app/connectors/zendesk/settings.json + filters.json to know scope).
 
 --dry-run: prints counts only, writes nothing.
 """
@@ -28,11 +29,25 @@ TICKET_FILES_DIR.mkdir(exist_ok=True)
 
 SUBDOMAIN = ZENDESK_CONFIG["subdomain"]
 BASE = f"https://{SUBDOMAIN}.zendesk.com/api/v2"
-API_TOKEN = os.environ.get(ZENDESK_CONFIG["api_token_env_var"])
-if not API_TOKEN:
-    print(f"ERROR: env var {ZENDESK_CONFIG['api_token_env_var']} not set", file=sys.stderr)
+
+from app.connectors.zendesk.oauth import (  # noqa: E402
+    ZendeskOAuthError,
+    oauth_sync_from_config,
+)
+
+try:
+    OAUTH = oauth_sync_from_config(ZENDESK_CONFIG)
+except ZendeskOAuthError as e:
+    print(f"ERROR: {e}", file=sys.stderr)
     sys.exit(1)
-AUTH = (f"{ZENDESK_CONFIG['api_user']}/token", API_TOKEN)
+
+
+def zget(url, **kwargs):
+    """GET with an OAuth bearer token, refreshing once on a 401."""
+    r = httpx.get(url, headers=OAUTH.auth_header(), **kwargs)
+    if r.status_code == 401:
+        r = httpx.get(url, headers=OAUTH.auth_header(force_refresh=True), **kwargs)
+    return r
 
 ALLOWED_GROUP_IDS = list(FILTERS["allowed_group_ids"])
 # Restore-time filter: exclude terminal statuses AND anything tagged as
@@ -47,7 +62,7 @@ DRY_RUN = "--dry-run" in sys.argv
 def search_active_tickets(group_id: str):
     page = 1
     while True:
-        r = httpx.get(
+        r = zget(
             f"{BASE}/search.json",
             params={
                 # status<closed = new/open/pending/hold/solved (skip closed only)
@@ -55,7 +70,6 @@ def search_active_tickets(group_id: str):
                 "page": page,
                 "per_page": 100,
             },
-            auth=AUTH,
             timeout=30,
         )
         r.raise_for_status()
@@ -96,10 +110,9 @@ def _is_staff(user: dict) -> bool:
 
 def fetch_comments(ticket_id: int):
     """Comments plus the `users` sideload, so authors can be classified."""
-    r = httpx.get(
+    r = zget(
         f"{BASE}/tickets/{ticket_id}/comments.json",
         params={"include": "users"},
-        auth=AUTH,
         timeout=30,
     )
     r.raise_for_status()

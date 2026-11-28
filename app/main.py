@@ -18,6 +18,7 @@ from .storage.logger import StructuredLogger
 from .storage.ticket_files import JsonTicketStore
 from .webhook import router as webhook_router
 from .worker import Worker
+from .connectors.zendesk.oauth import ZendeskOAuth, token_url_for
 from .connectors.zendesk.pusher import ZendeskPusherHTTP
 
 
@@ -43,13 +44,21 @@ def _build_worker() -> Worker:
         model=os.environ.get("ERS_MODEL", DEFAULT_MODEL),
     )
 
-    zd_token = os.environ.get(zd_config.get("api_token_env_var", "ZENDESK_API_TOKEN"), "")
-    if not zd_token:
-        logger.warn(stage="missing_env", message="ZENDESK_API_TOKEN not set")
+    auth = zd_config.get("auth", {})
+    client_id = os.environ.get(auth.get("client_id_env", "ZENDESK_OAUTH_CLIENT_ID"), "")
+    client_secret = os.environ.get(auth.get("client_secret_env", "ZENDESK_OAUTH_CLIENT_SECRET"), "")
+    if not client_id or not client_secret:
+        logger.warn(stage="missing_env", message="ZENDESK_OAUTH_CLIENT_ID/SECRET not set")
+    oauth = ZendeskOAuth(
+        token_url=token_url_for(zd_config["subdomain"]),
+        client_id=client_id,
+        client_secret=client_secret,
+        scope=auth.get("scope", "tickets:write tickets:read"),
+        grant_type=auth.get("grant_type", "client_credentials"),
+    )
     zd_pusher = ZendeskPusherHTTP(
         subdomain=zd_config["subdomain"],
-        api_user=zd_config["api_user"],
-        api_token=zd_token,
+        oauth=oauth,
         custom_field_id=zd_config["ers_custom_field_id"],
     )
 

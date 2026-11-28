@@ -124,11 +124,12 @@ python3.9 -m venv .venv          # 3.9 or newer
 .venv/bin/pip install -r requirements.txt
 ```
 
-Three environment variables are required:
+These environment variables are required:
 
 ```bash
 export OPENAI_API_KEY=sk-...
-export ZENDESK_API_TOKEN=...
+export ZENDESK_OAUTH_CLIENT_ID=kers_engine       # Zendesk OAuth client (client-credentials)
+export ZENDESK_OAUTH_CLIENT_SECRET=...            # must carry the tickets:write scope
 export ZENDESK_WEBHOOK_SECRET=      # leave empty to skip signature checks
 ```
 
